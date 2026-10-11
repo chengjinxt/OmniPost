@@ -201,7 +201,7 @@ describe('ZhihuAdapter', () => {
     expect(transport.requests).toEqual([]);
   });
 
-  it('degrades to manual handoff when publisher access is unavailable', async () => {
+  it('offers a visible assisted handoff when publisher access is unavailable', async () => {
     const transport = new FakeTransport();
     const adapter = new ZhihuAdapter({
       transport,
@@ -212,13 +212,14 @@ describe('ZhihuAdapter', () => {
     const target = {
       accountId: 'zhihu-account',
       platform: 'zhihu',
-      deliveryMode: DeliveryMode.MANUAL_HANDOFF,
+      deliveryMode: DeliveryMode.ASSISTED_BROWSER,
       scheduledAt: null,
       platformFields: { bodyHtml: '<p>正文</p>' },
     };
 
     expect((await adapter.probeCapabilities('zhihu-account')).deliveryModes).toEqual([
       DeliveryMode.MANUAL_HANDOFF,
+      DeliveryMode.ASSISTED_BROWSER,
     ]);
     const prepared = await adapter.prepare('revision-1', target);
     const receipt = await adapter.submit(prepared.id);

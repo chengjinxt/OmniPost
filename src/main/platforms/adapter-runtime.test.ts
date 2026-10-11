@@ -7,7 +7,11 @@ import {
   type ContentRevision,
   type PublishTarget,
 } from '../../domain/index.js';
-import { buildPreparedPublication } from './adapter-runtime.js';
+import {
+  buildPreparedPublication,
+  deliveryModesWithAssistedBrowser,
+  isCompatibleDeliveryMode,
+} from './adapter-runtime.js';
 
 const NOW = '2026-10-12T05:00:00.000Z';
 const REVISION_HASH = 'a'.repeat(64);
@@ -71,5 +75,20 @@ describe('buildPreparedPublication', () => {
     expect(buildPreparedPublication(revision('revision-legacy'), target, NOW).contentHash).toBe(
       REVISION_HASH,
     );
+  });
+});
+
+describe('assisted delivery mode compatibility', () => {
+  it('offers a visible browser when the account probe confirms it', () => {
+    expect(deliveryModesWithAssistedBrowser(
+      [DeliveryMode.MANUAL_HANDOFF],
+      { directApi: 'UNAVAILABLE', remoteDraft: 'UNAVAILABLE', assistedBrowser: 'AVAILABLE' },
+    )).toEqual([DeliveryMode.MANUAL_HANDOFF, DeliveryMode.ASSISTED_BROWSER]);
+  });
+
+  it('allows explicit manual or assisted handoff without claiming API capability', () => {
+    expect(isCompatibleDeliveryMode(DeliveryMode.MANUAL_HANDOFF, DeliveryMode.ASSISTED_BROWSER)).toBe(true);
+    expect(isCompatibleDeliveryMode(DeliveryMode.MANUAL_HANDOFF, DeliveryMode.MANUAL_HANDOFF)).toBe(true);
+    expect(isCompatibleDeliveryMode(DeliveryMode.MANUAL_HANDOFF, DeliveryMode.DIRECT_API)).toBe(false);
   });
 });

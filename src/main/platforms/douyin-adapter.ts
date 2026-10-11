@@ -18,6 +18,8 @@ import {
   buildPreparedPublication,
   buildSubmissionReceipt,
   capabilitiesFromContext,
+  deliveryModesWithAssistedBrowser,
+  isCompatibleDeliveryMode,
   requireAccount,
   requireRevision,
   responseObject,
@@ -63,7 +65,10 @@ export class DouyinAdapter implements PlatformAdapter {
       accountId,
       platform: PLATFORM,
       context: account.capabilityContext,
-      deliveryModes,
+      deliveryModes: deliveryModesWithAssistedBrowser(
+        deliveryModes,
+        account.capabilityContext.probes,
+      ),
       contentKinds: [ContentKind.IMAGE_POST, ContentKind.VIDEO],
       qualificationLabels: {
         DOUYIN_APPROVED_APPLICATION: 'Approved Douyin application',
@@ -104,7 +109,7 @@ export class DouyinAdapter implements PlatformAdapter {
       contentKind: revision.kind,
       context: account.capabilityContext,
     });
-    if (resolved.deliveryMode !== target.deliveryMode) {
+    if (!isCompatibleDeliveryMode(resolved.deliveryMode, target.deliveryMode)) {
       issues.push(
         validationIssue(
           'capability-unavailable',

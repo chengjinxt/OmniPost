@@ -22,6 +22,8 @@ import {
   buildPreparedPublication,
   buildSubmissionReceipt,
   capabilitiesFromContext,
+  deliveryModesWithAssistedBrowser,
+  isCompatibleDeliveryMode,
   requireAccount,
   requireRevision,
   responseObject,
@@ -69,7 +71,10 @@ export class ZhihuAdapter implements PlatformAdapter {
       accountId,
       platform: PLATFORM,
       context: account.capabilityContext,
-      deliveryModes,
+      deliveryModes: deliveryModesWithAssistedBrowser(
+        deliveryModes,
+        account.capabilityContext.probes,
+      ),
       contentKinds: [ContentKind.ARTICLE, ContentKind.IMAGE_POST],
       qualificationLabels: {
         ZHIHU_PUBLISHER_ACCESS: 'Zhihu Publisher test-list access',
@@ -109,7 +114,7 @@ export class ZhihuAdapter implements PlatformAdapter {
       contentKind: revision.kind,
       context: account.capabilityContext,
     });
-    if (resolved.deliveryMode !== target.deliveryMode) {
+    if (!isCompatibleDeliveryMode(resolved.deliveryMode, target.deliveryMode)) {
       issues.push(
         validationIssue(
           'capability-unavailable',

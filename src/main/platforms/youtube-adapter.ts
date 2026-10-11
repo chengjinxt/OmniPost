@@ -18,6 +18,8 @@ import {
   buildPreparedPublication,
   buildSubmissionReceipt,
   capabilitiesFromContext,
+  deliveryModesWithAssistedBrowser,
+  isCompatibleDeliveryMode,
   requireAccount,
   requireRevision,
   responseObject,
@@ -66,7 +68,10 @@ export class YouTubeAdapter implements PlatformAdapter {
       accountId,
       platform: PLATFORM,
       context: account.capabilityContext,
-      deliveryModes: [deliveryMode],
+      deliveryModes: deliveryModesWithAssistedBrowser(
+        [deliveryMode],
+        account.capabilityContext.probes,
+      ),
       contentKinds: [ContentKind.VIDEO],
       qualificationLabels: {},
       scopeNames: ['youtube.upload'],
@@ -104,7 +109,7 @@ export class YouTubeAdapter implements PlatformAdapter {
       contentKind: revision.kind,
       context: account.capabilityContext,
     });
-    if (resolved.deliveryMode !== target.deliveryMode) {
+    if (!isCompatibleDeliveryMode(resolved.deliveryMode, target.deliveryMode)) {
       issues.push(
         validationIssue(
           'capability-unavailable',

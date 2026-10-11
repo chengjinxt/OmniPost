@@ -191,7 +191,7 @@ describe('YouTubeAdapter', () => {
     expect(transport.requests).toEqual([]);
   });
 
-  it('degrades to manual handoff when youtube.upload is unavailable', async () => {
+  it('offers a visible assisted handoff when youtube.upload is unavailable', async () => {
     const transport = new FakeTransport();
     const adapter = new YouTubeAdapter({
       transport,
@@ -202,13 +202,14 @@ describe('YouTubeAdapter', () => {
     const target = {
       accountId: 'youtube-account',
       platform: 'youtube',
-      deliveryMode: DeliveryMode.MANUAL_HANDOFF,
+      deliveryMode: DeliveryMode.ASSISTED_BROWSER,
       scheduledAt: null,
       platformFields: { uploadUri: 'file:///workspace/release.mp4' },
     };
 
     expect((await adapter.probeCapabilities('youtube-account')).deliveryModes).toEqual([
       DeliveryMode.MANUAL_HANDOFF,
+      DeliveryMode.ASSISTED_BROWSER,
     ]);
     const prepared = await adapter.prepare('revision-1', target);
     const receipt = await adapter.submit(prepared.id);

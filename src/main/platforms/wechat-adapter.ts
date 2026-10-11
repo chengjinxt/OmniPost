@@ -19,6 +19,8 @@ import {
   buildPreparedPublication,
   buildSubmissionReceipt,
   capabilitiesFromContext,
+  deliveryModesWithAssistedBrowser,
+  isCompatibleDeliveryMode,
   requireAccount,
   requireRevision,
   responseObject,
@@ -72,7 +74,10 @@ export class WeChatAdapter implements PlatformAdapter {
       accountId,
       platform: PLATFORM,
       context: account.capabilityContext,
-      deliveryModes: modes,
+      deliveryModes: deliveryModesWithAssistedBrowser(
+        modes,
+        account.capabilityContext.probes,
+      ),
       contentKinds: [ContentKind.ARTICLE, ContentKind.IMAGE_POST],
       qualificationLabels: {
         WECHAT_VERIFIED_ENTERPRISE: 'Verified enterprise WeChat account',
@@ -109,7 +114,7 @@ export class WeChatAdapter implements PlatformAdapter {
       contentKind: revision.kind,
       context: account.capabilityContext,
     });
-    if (resolved.deliveryMode !== target.deliveryMode) {
+    if (!isCompatibleDeliveryMode(resolved.deliveryMode, target.deliveryMode)) {
       issues.push(
         validationIssue(
           'capability-unavailable',
@@ -118,7 +123,9 @@ export class WeChatAdapter implements PlatformAdapter {
         ),
       );
     }
-    if (!account.credentials.accessToken) {
+    const usesOfficialApi = target.deliveryMode === DeliveryMode.DIRECT_API ||
+      target.deliveryMode === DeliveryMode.REMOTE_DRAFT;
+    if (usesOfficialApi && !account.credentials.accessToken) {
       issues.push(validationIssue('credential-missing', 'WeChat access token is required'));
     }
     if (!revision.title.trim()) {
@@ -127,7 +134,7 @@ export class WeChatAdapter implements PlatformAdapter {
     if (!stringField(target.platformFields, 'bodyHtml')) {
       issues.push(validationIssue('body-html-required', 'Rendered HTML is required', 'bodyHtml'));
     }
-    if (!stringField(target.platformFields, 'coverMediaId')) {
+    if (usesOfficialApi && !stringField(target.platformFields, 'coverMediaId')) {
       issues.push(
         validationIssue('cover-media-required', 'WeChat cover media ID is required', 'coverMediaId'),
       );
@@ -168,19 +175,24 @@ export class WeChatAdapter implements PlatformAdapter {
         },
       ],
     };
-    const accessToken = account.credentials.accessToken ?? '';
-    const response = responseObject(
-      await this.#transport.send({
-        method: 'POST',
-        url: `${API_ROOT}/draft/add?access_token=${encodeURIComponent(accessToken)}`,
-        headers: { 'content-type': 'application/json' },
-        body: payload,
-        idempotencyKey: prepared.idempotencyKey,
-      }),
-    );
-    const remoteDraftId =
-      typeof response.media_id === 'string' ? response.media_id : null;
-    if (!remoteDraftId) throw new Error('WeChat draft response did not include media_id');
+    let remoteDraftId: string | null = null;
+    if (
+      target.deliveryMode === DeliveryMode.DIRECT_API ||
+      target.deliveryMode === DeliveryMode.REMOTE_DRAFT
+    ) {
+      const accessToken = account.credentials.accessToken ?? '';
+      const response = responseObject(
+        await this.#transport.send({
+          method: 'POST',
+          url: `${API_ROOT}/draft/add?access_token=${encodeURIComponent(accessToken)}`,
+          headers: { 'content-type': 'application/json' },
+          body: payload,
+          idempotencyKey: prepared.idempotencyKey,
+        }),
+      );
+      remoteDraftId = typeof response.media_id === 'string' ? response.media_id : null;
+      if (!remoteDraftId) throw new Error('WeChat draft response did not include media_id');
+    }
 
     this.#store.savePrepared({
       prepared,

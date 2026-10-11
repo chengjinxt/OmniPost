@@ -192,7 +192,7 @@ describe('DouyinAdapter', () => {
     });
   });
 
-  it('degrades to manual handoff when video.create is unavailable', async () => {
+  it('offers a visible assisted handoff when video.create is unavailable', async () => {
     const transport = new FakeTransport();
     const adapter = new DouyinAdapter({
       transport,
@@ -203,13 +203,16 @@ describe('DouyinAdapter', () => {
     const target = {
       accountId: 'douyin-account',
       platform: 'douyin',
-      deliveryMode: DeliveryMode.MANUAL_HANDOFF,
+      deliveryMode: DeliveryMode.ASSISTED_BROWSER,
       scheduledAt: null,
       platformFields: { remoteMediaIds: ['video-id-1'] },
     };
 
     const capabilities = await adapter.probeCapabilities('douyin-account');
-    expect(capabilities.deliveryModes).toEqual([DeliveryMode.MANUAL_HANDOFF]);
+    expect(capabilities.deliveryModes).toEqual([
+      DeliveryMode.MANUAL_HANDOFF,
+      DeliveryMode.ASSISTED_BROWSER,
+    ]);
     expect(capabilities.scopes).toContainEqual({
       name: 'video.create.bind',
       granted: false,

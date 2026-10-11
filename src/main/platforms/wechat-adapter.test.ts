@@ -64,7 +64,7 @@ function createAccountSource(verified: boolean): AccountConnectionSource {
           probes: {
             directApi: verified ? 'AVAILABLE' : 'UNAVAILABLE',
             remoteDraft: 'AVAILABLE',
-            assistedBrowser: 'UNKNOWN',
+            assistedBrowser: 'AVAILABLE',
           },
         },
       };
@@ -198,6 +198,35 @@ describe('WeChatAdapter', () => {
       state: 'NEEDS_ACTION',
       message: 'Remote draft requires user publication',
     });
+    expect(await adapter.openAssistedFlow(prepared.id)).toMatchObject({
+      preparedId: prepared.id,
+      status: 'OPEN',
+    });
+  });
+
+  it('prepares an assisted browser handoff without calling the draft API', async () => {
+    const transport = new FakeTransport();
+    const adapter = new WeChatAdapter({
+      transport,
+      revisions: revisionSource,
+      accounts: createAccountSource(false),
+      now: () => NOW,
+    });
+    const target = {
+      ...directTarget,
+      deliveryMode: DeliveryMode.ASSISTED_BROWSER,
+      platformFields: {
+        title: 'Visible browser title',
+        bodyHtml: '<p>Visible browser body</p>',
+      },
+    };
+
+    expect((await adapter.probeCapabilities('wechat-account')).deliveryModes)
+      .toContain(DeliveryMode.ASSISTED_BROWSER);
+    expect(await adapter.validate('revision-1', target)).toEqual([]);
+    const prepared = await adapter.prepare('revision-1', target);
+
+    expect(transport.requests).toEqual([]);
     expect(await adapter.openAssistedFlow(prepared.id)).toMatchObject({
       preparedId: prepared.id,
       status: 'OPEN',

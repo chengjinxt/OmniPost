@@ -1,4 +1,5 @@
 import {
+  DeliveryMode,
   Sha256Schema,
   createPublishIdempotencyKey,
   type AccountCapabilities,
@@ -111,6 +112,27 @@ export function stringArrayField(fields: JsonObject, name: string): string[] {
 export function booleanField(fields: JsonObject, name: string): boolean | null {
   const value = jsonField(fields, name);
   return typeof value === 'boolean' ? value : null;
+}
+
+export function deliveryModesWithAssistedBrowser(
+  modes: readonly PublishTarget['deliveryMode'][],
+  probes: CapabilityContext['probes'],
+): PublishTarget['deliveryMode'][] {
+  return [...new Set([
+    ...modes,
+    ...(probes.assistedBrowser === 'AVAILABLE'
+      ? [DeliveryMode.ASSISTED_BROWSER]
+      : []),
+  ])];
+}
+
+export function isCompatibleDeliveryMode(
+  resolved: PublishTarget['deliveryMode'],
+  requested: PublishTarget['deliveryMode'],
+): boolean {
+  return requested === DeliveryMode.ASSISTED_BROWSER ||
+    requested === DeliveryMode.MANUAL_HANDOFF ||
+    requested === resolved;
 }
 
 export function buildPreparedPublication(
