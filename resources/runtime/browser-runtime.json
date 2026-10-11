@@ -1,0 +1,8 @@
+{
+  "automation": "playwright",
+  "browserProvisioning": "system",
+  "browserChannel": "msedge",
+  "bundledChromium": false,
+  "missingBrowserFallback": "MANUAL_HANDOFF",
+  "profileIsolation": "platform-account"
+}
