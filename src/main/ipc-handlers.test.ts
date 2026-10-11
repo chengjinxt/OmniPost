@@ -132,7 +132,12 @@ describe('registerApplicationIpc', () => {
 
     await expect(handlers.get(IPC_CHANNELS.createPublishPlan)?.({}, {
       revisionId: 'revision-1', accountIds: ['account-1'], scheduledAt: null,
-    })).resolves.toMatchObject({ planId: 'plan-1', jobs: [{ state: 'AWAITING_APPROVAL' }] });
+    })).resolves.toMatchObject({
+      planId: 'plan-1',
+      contentHash: 'b'.repeat(64),
+      targets: [{ platformFields: { title: 'Approved snapshot title' } }],
+      jobs: [{ state: 'AWAITING_APPROVAL' }],
+    });
     await expect(handlers.get(IPC_CHANNELS.approvePublishPlan)?.({}, { planId: 'plan-1' }))
       .resolves.toMatchObject({ planId: 'plan-1', jobs: [{ state: 'APPROVED' }] });
     expect(publishing.approve).toHaveBeenCalledWith('plan-1');
@@ -246,8 +251,27 @@ function publishingServiceFixture() {
   });
   return {
     listJobs: vi.fn(() => [job('AWAITING_APPROVAL')]),
-    createPlan: vi.fn(() => ({ plan: { id: 'plan-1' }, jobs: [job('AWAITING_APPROVAL')] })),
-    approve: vi.fn(() => ({ plan: { id: 'plan-1' }, jobs: [job('APPROVED')] })),
+    createPlan: vi.fn(() => ({ plan: planFixture(), jobs: [job('AWAITING_APPROVAL')] })),
+    approve: vi.fn(() => ({ plan: planFixture(), jobs: [job('APPROVED')] })),
+  };
+}
+
+function planFixture() {
+  return {
+    id: 'plan-1',
+    revisionId: 'revision-1',
+    variantIds: ['variant-1'],
+    contentHash: 'b'.repeat(64),
+    targets: [{
+      accountId: 'account-1',
+      platform: 'YOUTUBE',
+      deliveryMode: 'DIRECT_API' as const,
+      scheduledAt: null,
+      platformFields: {
+        title: 'Approved snapshot title',
+        bodyMarkdown: 'Approved snapshot body',
+      },
+    }],
   };
 }
 

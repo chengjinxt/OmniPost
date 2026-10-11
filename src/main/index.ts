@@ -237,9 +237,6 @@ if (ownsSingleInstanceLock) app.whenReady().then(async () => {
       void logger.write('error', 'scheduler-tick-failed', { error: String(error) });
     },
   });
-  await pruneExpiredRunArtifacts(artifactRoot);
-  await publishingRuntime.start();
-
   const shutdown = new ShutdownCoordinator({
     stopPublishing: () => publishingRuntime?.stop() ?? Promise.resolve(),
     closeBrowsers: () => assistedBrowser?.closeAll() ?? Promise.resolve(),
@@ -275,6 +272,10 @@ if (ownsSingleInstanceLock) app.whenReady().then(async () => {
       },
     );
   });
+
+  await pruneExpiredRunArtifacts(artifactRoot);
+  if (isQuitting) return;
+  await publishingRuntime.start();
 }).catch(() => {
   dialog.showErrorBox('OmniPost 启动失败', '初始化本地数据或安全运行时失败。请查看诊断日志。');
   app.exit(1);

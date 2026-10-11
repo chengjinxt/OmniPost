@@ -11,7 +11,7 @@ import {
   Sparkles,
   UsersRound,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { APP_METADATA } from '../../shared/app-metadata.js';
 import { capabilityContextDtoSchema } from '../../shared/ipc.js';
@@ -26,6 +26,7 @@ import type {
   ImportPreviewDto,
   ImporterChoice,
   PublishJobDto,
+  PublishPlanResultDto,
   SaveAccountRequest,
   SaveAiProfileRequest,
 } from '../../shared/ipc.js';
@@ -62,7 +63,7 @@ export function App(): React.JSX.Element {
   const [accountBusy, setAccountBusy] = useState(false);
   const [publishJobs, setPublishJobs] = useState<PublishJobDto[]>([]);
   const [publishing, setPublishing] = useState<ContentDocumentDto>();
-  const [pendingPlanId, setPendingPlanId] = useState<string>();
+  const [pendingPlan, setPendingPlan] = useState<PublishPlanResultDto>();
   const [publishBusy, setPublishBusy] = useState(false);
   const [aiProfile, setAiProfile] = useState<AiProfileDto | null>(null);
   const [aiVariants, setAiVariants] = useState<AiVariantResultDto[]>([]);
@@ -133,7 +134,7 @@ export function App(): React.JSX.Element {
 
   const openPublisher = (document: ContentDocumentDto): void => {
     setPublishing(document);
-    setPendingPlanId(undefined);
+    setPendingPlan(undefined);
     setError(undefined);
     setView('publisher');
   };
@@ -153,7 +154,7 @@ export function App(): React.JSX.Element {
         scheduledAt,
         ...(platformFieldsByAccount === undefined ? {} : { platformFieldsByAccount }),
       });
-      setPendingPlanId(result.planId);
+      setPendingPlan(result);
       setPublishJobs((current) => [
         ...result.jobs,
         ...current.filter((job) => !result.jobs.some((updated) => updated.id === job.id)),
@@ -166,11 +167,12 @@ export function App(): React.JSX.Element {
   };
 
   const approvePublishPlan = async (): Promise<void> => {
-    if (pendingPlanId === undefined) return;
+    if (pendingPlan === undefined) return;
     setPublishBusy(true);
     setError(undefined);
     try {
-      const result = await window.omniPost.approvePublishPlan(pendingPlanId);
+      const result = await window.omniPost.approvePublishPlan(pendingPlan.planId);
+      setPendingPlan(result);
       setPublishJobs((current) => [
         ...result.jobs,
         ...current.filter((job) => !result.jobs.some((updated) => updated.id === job.id)),
@@ -434,7 +436,7 @@ export function App(): React.JSX.Element {
             busy={publishBusy || aiBusy}
             document={publishing}
             jobs={publishJobs.filter((job) => job.revisionId === publishing.revisionId)}
-            planId={pendingPlanId}
+            plan={pendingPlan}
             onApprove={approvePublishPlan}
             onBack={() => setView('library')}
             onCreate={createPublishPlan}
@@ -660,6 +662,12 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatSnapshotField(value: unknown, fallback: string): string {
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return fallback;
+  return JSON.stringify(value);
+}
+
 function PublicationWorkspace({
   accounts,
   aiConfigured,
@@ -667,7 +675,7 @@ function PublicationWorkspace({
   busy,
   document,
   jobs,
-  planId,
+  plan,
   onApprove,
   onBack,
   onCreate,
@@ -681,7 +689,7 @@ function PublicationWorkspace({
   busy: boolean;
   document: ContentDocumentDto;
   jobs: PublishJobDto[];
-  planId: string | undefined;
+  plan: PublishPlanResultDto | undefined;
   onApprove(): Promise<void>;
   onBack(): void;
   onCreate(
@@ -698,8 +706,40 @@ function PublicationWorkspace({
   const [canonicalUrl, setCanonicalUrl] = useState('');
   const [platformFieldsJson, setPlatformFieldsJson] = useState('{}');
   const [platformFieldsError, setPlatformFieldsError] = useState<string>();
+  const planId = plan?.planId;
   const planJobs = planId === undefined ? [] : jobs.filter((job) => job.planId === planId);
-  const canApprove = planJobs.some((job) => job.state === 'AWAITING_APPROVAL');
+  const documentVariants = useMemo(
+    () => aiVariants.filter((variant) => variant.revisionId === document.revisionId),
+    [aiVariants, document.revisionId],
+  );
+  const currentPlanInputs = useMemo(() => JSON.stringify({
+    accountIds: [...selectedAccounts].sort(),
+    schedule,
+    platformFieldsJson,
+    variants: documentVariants
+      .map((variant) => ({
+        platform: variant.platform,
+        variantId: variant.variantId,
+        contentHash: variant.contentHash,
+      }))
+      .sort((left, right) => left.platform.localeCompare(right.platform)),
+  }), [documentVariants, platformFieldsJson, schedule, selectedAccounts]);
+  const capturedPlanId = useRef<string | undefined>(undefined);
+  const [plannedInputs, setPlannedInputs] = useState<string>();
+  useEffect(() => {
+    if (planId === undefined) {
+      capturedPlanId.current = undefined;
+      setPlannedInputs(undefined);
+      return;
+    }
+    if (capturedPlanId.current !== planId) {
+      capturedPlanId.current = planId;
+      setPlannedInputs(currentPlanInputs);
+    }
+  }, [currentPlanInputs, planId]);
+  const planInputsAreCurrent = plannedInputs !== undefined && plannedInputs === currentPlanInputs;
+  const canApprove = planInputsAreCurrent &&
+    planJobs.some((job) => job.state === 'AWAITING_APPROVAL');
   const selectedAccount = accounts.find((account) => selectedAccounts.includes(account.id));
   const selectedPlatform = selectedAccount?.platform;
   const isMediumHandoff = selectedAccount?.platform === 'MEDIUM'
@@ -826,9 +866,9 @@ function PublicationWorkspace({
           <button className="primary-action" disabled={busy || selectedAccounts.length === 0} type="submit">生成发布计划</button>
         </form>
       </div>
-      {aiVariants.length === 0 ? null : (
+      {documentVariants.length === 0 ? null : (
         <section className="variant-list" aria-label="AI 平台版本">
-          {aiVariants.map((variant) => (
+          {documentVariants.map((variant) => (
             <article key={variant.variantId}>
               <span className="status-chip">{variant.platform}</span>
               <h2>{variant.title ?? document.title}</h2>
@@ -845,7 +885,32 @@ function PublicationWorkspace({
             <h2>逐项确认后批准此内容版本</h2>
             <p>批准只绑定当前内容哈希，不会自动批准之后的编辑。</p>
           </div>
+          {plan === undefined ? null : (
+            <section className="approval-snapshot" aria-label="批准载荷快照">
+              <h3>将要批准的不可变载荷</h3>
+              <p>内容哈希</p>
+              <code>{plan.contentHash}</code>
+              {plan.targets.map((target) => (
+                <article key={`${target.accountId}-${target.platform}`}>
+                  <span className="status-chip">{target.platform} · {target.deliveryMode}</span>
+                  <p>账号：{target.accountId}</p>
+                  <h4>{formatSnapshotField(target.platformFields.title, '（无标题）')}</h4>
+                  <pre>{formatSnapshotField(
+                    target.platformFields.bodyMarkdown ?? target.platformFields.bodyHtml,
+                    '（无文字正文）',
+                  )}</pre>
+                  <details>
+                    <summary>查看全部平台字段</summary>
+                    <pre>{JSON.stringify(target.platformFields, null, 2)}</pre>
+                  </details>
+                </article>
+              ))}
+            </section>
+          )}
           <div className="plan-jobs">{planJobs.map((job) => <JobCard job={job} key={job.id} />)}</div>
+          {planInputsAreCurrent ? null : (
+            <p className="form-error" role="status">平台版本或计划字段已经变化，请重新生成发布计划后再批准。</p>
+          )}
           <button className="primary-action" disabled={busy || !canApprove} type="button" onClick={() => void onApprove()}>批准此内容版本</button>
         </section>
       )}

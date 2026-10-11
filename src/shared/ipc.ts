@@ -182,8 +182,19 @@ export const publishJobDtoSchema = z.object({
 }).strict();
 
 export const publishJobListDtoSchema = z.array(publishJobDtoSchema);
+export const publishTargetSnapshotDtoSchema = z.object({
+  accountId: z.string().min(1),
+  platform: platformIdDtoSchema,
+  deliveryMode: deliveryModeDtoSchema,
+  scheduledAt: z.string().datetime({ offset: true }).nullable(),
+  platformFields: z.record(z.string(), z.json()),
+}).strict();
 export const publishPlanResultDtoSchema = z.object({
   planId: z.string().min(1),
+  revisionId: z.string().min(1),
+  variantIds: z.array(z.string().min(1)),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  targets: z.array(publishTargetSnapshotDtoSchema).min(1),
   jobs: publishJobListDtoSchema,
 }).strict();
 

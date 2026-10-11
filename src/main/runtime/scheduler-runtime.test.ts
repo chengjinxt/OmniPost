@@ -90,6 +90,27 @@ describe('NonOverlappingSchedulerLoop', () => {
     expect(calls).toBe(1);
   });
 
+  it('reports a directly started tick as active until it settles', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const loop = new NonOverlappingSchedulerLoop({
+      runner: { async runNext() { await pending; return null; } },
+      intervalMs: 30_000,
+      intervals: new ManualIntervals(),
+    });
+
+    const tick = loop.tick();
+    let idle = false;
+    const waiting = loop.whenIdle().then(() => { idle = true; });
+    await Promise.resolve();
+    expect(idle).toBe(false);
+
+    release();
+    await tick;
+    await waiting;
+    expect(idle).toBe(true);
+  });
+
   it('runs at most one scheduler step per interval and can be stopped', async () => {
     const intervals = new ManualIntervals();
     let calls = 0;
@@ -127,6 +148,35 @@ describe('NonOverlappingSchedulerLoop', () => {
 });
 
 describe('PublishingRuntime', () => {
+  it('can stop safely during the first tick without starting the interval afterward', async () => {
+    let release!: () => void;
+    const firstTick = new Promise<void>((resolve) => { release = resolve; });
+    const events: string[] = [];
+    const runtime = new PublishingRuntime({
+      recovery: {
+        recoverAfterRestart() { return { interrupted: 0, missed: 0 }; },
+      },
+      loop: {
+        async tick() {
+          events.push('tick');
+          await firstTick;
+          return { status: 'RAN', result: null };
+        },
+        start() { events.push('interval:start'); },
+        stop() { events.push('interval:stop'); },
+        whenIdle() { return firstTick; },
+      },
+    });
+
+    const starting = runtime.start();
+    await Promise.resolve();
+    const stopping = runtime.stop();
+    release();
+    await Promise.all([starting, stopping]);
+
+    expect(events).toEqual(['tick', 'interval:stop']);
+  });
+
   it('recovers missed jobs before the first scheduler tick and does not auto-send them', async () => {
     const events: string[] = [];
     const runtime = new PublishingRuntime({

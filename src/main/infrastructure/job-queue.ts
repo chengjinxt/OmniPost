@@ -87,11 +87,19 @@ export class PersistentJobQueue {
     const timestamp = startedAt.toISOString();
 
     return this.database.transaction(() => {
-      const interrupted = this.database.prepare(`
+      const requeued = this.database.prepare(`
+        UPDATE publish_jobs
+        SET state = 'APPROVED', lease_owner = NULL, lease_until = NULL,
+            last_error = 'Application restarted during side-effect-free preparation; job requeued',
+            updated_at = ?
+        WHERE state = 'PREPARING'
+      `).run(timestamp).changes;
+
+      const uncertain = this.database.prepare(`
         UPDATE publish_jobs
         SET state = 'UNKNOWN', lease_owner = NULL, lease_until = NULL,
             last_error = 'Application restarted while delivery was active', updated_at = ?
-        WHERE state IN ('PREPARING', 'SUBMITTED', 'PROCESSING')
+        WHERE state IN ('SUBMITTED', 'PROCESSING')
       `).run(timestamp).changes;
 
       const missed = this.database.prepare(`
@@ -101,7 +109,7 @@ export class PersistentJobQueue {
         WHERE state = 'SCHEDULED' AND scheduled_at < ?
       `).run(timestamp, timestamp).changes;
 
-      return { interrupted, missed };
+      return { interrupted: requeued + uncertain, missed };
     }).immediate();
   }
 }

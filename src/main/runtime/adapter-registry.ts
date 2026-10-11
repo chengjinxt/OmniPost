@@ -15,6 +15,7 @@ import {
   WeChatAdapter,
   YouTubeAdapter,
   ZhihuAdapter,
+  currentPlatformOperationSignal,
   type AccountConnectionSource,
   type AdapterDependencies,
   type HttpRequest,
@@ -54,6 +55,8 @@ export class FetchHttpTransport implements HttpTransport {
       headers['idempotency-key'] = request.idempotencyKey;
     }
     const init: RequestInit = { method: request.method, headers };
+    const signal = currentPlatformOperationSignal();
+    if (signal !== undefined) init.signal = signal;
     if (request.body !== undefined) {
       init.body = typeof request.body === 'string'
         ? request.body

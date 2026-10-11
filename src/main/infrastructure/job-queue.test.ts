@@ -53,16 +53,16 @@ describe('PersistentJobQueue', () => {
     expect(readState(database, 'upcoming')).toBe('SCHEDULED');
   });
 
-  it('marks interrupted submissions UNKNOWN so they cannot be submitted twice', () => {
+  it('requeues side-effect-free preparation but quarantines interrupted submissions', () => {
     insertJob(database, 'preparing', 'account-a', 'PREPARING');
     insertJob(database, 'submitted', 'account-b', 'SUBMITTED');
 
     const recovery = queue.recoverAfterRestart(now);
 
     expect(recovery).toEqual({ interrupted: 2, missed: 0 });
-    expect(readState(database, 'preparing')).toBe('UNKNOWN');
+    expect(readState(database, 'preparing')).toBe('APPROVED');
     expect(readState(database, 'submitted')).toBe('UNKNOWN');
-    expect(queue.claimNextDue('worker', now, 60_000)).toBeUndefined();
+    expect(queue.claimNextDue('worker', now, 60_000)?.id).toBe('preparing');
   });
 });
 

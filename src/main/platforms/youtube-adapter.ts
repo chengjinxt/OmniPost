@@ -14,6 +14,7 @@ import { resolvePlatformCapability } from './capability-registry.js';
 import {
   AdapterRuntimeStore,
   PlatformValidationError,
+  accountBindingValidationIssue,
   buildAssistedSession,
   buildPreparedPublication,
   buildSubmissionReceipt,
@@ -91,6 +92,8 @@ export class YouTubeAdapter implements PlatformAdapter {
     const account = await this.#accounts.getAccount(target.accountId);
     if (!revision) return [validationIssue('revision-not-found', 'Content revision not found')];
     if (!account) return [validationIssue('account-not-found', 'YouTube account not found')];
+    const accountBindingIssue = accountBindingValidationIssue(target, account);
+    if (accountBindingIssue !== null) issues.push(accountBindingIssue);
     if (target.platform !== PLATFORM) {
       issues.push(validationIssue('platform-mismatch', 'Target platform must be youtube'));
     }
@@ -136,7 +139,7 @@ export class YouTubeAdapter implements PlatformAdapter {
     const issues = await this.validate(revisionId, target);
     if (issues.length > 0) throw new PlatformValidationError(issues);
     const revision = await requireRevision(this.#revisions, revisionId);
-    const account = await requireAccount(this.#accounts, target.accountId);
+    const account = await requireAccount(this.#accounts, target.accountId, target);
     const prepared = buildPreparedPublication(revision, target, this.#now());
     this.#store.savePrepared({
       prepared,

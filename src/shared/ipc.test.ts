@@ -10,6 +10,7 @@ import {
   saveAccountRequestSchema,
   createPublishPlanRequestSchema,
   publishJobDtoSchema,
+  publishPlanResultDtoSchema,
   reviseContentRequestSchema,
   saveAiProfileRequestSchema,
   aiProfileDtoSchema,
@@ -149,6 +150,25 @@ describe('content IPC schemas', () => {
       statusMessage: null,
       updatedAt: '2026-10-12T00:00:00.000Z',
     })).toMatchObject({ state: 'AWAITING_APPROVAL' });
+    expect(publishPlanResultDtoSchema.parse({
+      planId: 'plan-1',
+      revisionId: 'revision-1',
+      variantIds: ['variant-1'],
+      contentHash: 'b'.repeat(64),
+      targets: [{
+        accountId: 'account-1',
+        platform: 'YOUTUBE',
+        deliveryMode: 'DIRECT_API',
+        scheduledAt: null,
+        platformFields: {
+          title: 'Approved YouTube title',
+          bodyMarkdown: 'Approved description',
+        },
+      }],
+      jobs: [],
+    })).toMatchObject({
+      targets: [{ platformFields: { title: 'Approved YouTube title' } }],
+    });
   });
 
   it('keeps AI keys write-only and validates generated variant provenance', () => {

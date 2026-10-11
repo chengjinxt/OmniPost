@@ -44,6 +44,7 @@ class FakeAdapter implements PlatformAdapter {
   readonly events: string[] = [];
   readonly preparedTargets = new Map<string, PublishTarget>();
   submitBehavior: 'success' | 'never' | 'error' = 'success';
+  pollBehavior: 'success' | 'never' = 'success';
   pollResults: Array<RemotePublicationStatus | Error> = [];
 
   async probeCapabilities(accountId: string): Promise<AccountCapabilities> {
@@ -99,6 +100,7 @@ class FakeAdapter implements PlatformAdapter {
 
   async poll(receipt: SubmissionReceipt): Promise<RemotePublicationStatus> {
     this.events.push('poll');
+    if (this.pollBehavior === 'never') return new Promise(() => undefined);
     const next = this.pollResults.shift() ?? remoteStatus('PUBLISHED', receipt.remoteId);
     if (next instanceof Error) throw next;
     return next;
@@ -238,7 +240,28 @@ describe('PersistentSchedulerService', () => {
     );
   });
 
-  it('polls an UNKNOWN receipt before claiming new work and never repeats submit', async () => {
+  it('bounds remote status polling and leaves the receipt recoverable', async () => {
+    seedJob(database, { id: 'job-poll-timeout', deliveryMode: DeliveryMode.DIRECT_API });
+    const adapter = new FakeAdapter();
+    adapter.pollBehavior = 'never';
+    const scheduler = createScheduler(database, adapter, notifications, 5);
+
+    const result = await scheduler.runNext();
+
+    expect(result).toEqual({
+      action: 'EXECUTED',
+      jobId: 'job-poll-timeout',
+      state: 'UNKNOWN',
+    });
+    expect(readJob(database, 'job-poll-timeout')).toMatchObject({
+      state: 'UNKNOWN',
+      remote_publication_id: 'remote-prepared-revision-job-poll-timeout',
+    });
+    expect(readAttempts(database, 'job-poll-timeout')[0]?.receipt_json)
+      .toContain('receipt-prepared-revision-job-poll-timeout');
+  });
+
+  it('polls an UNKNOWN receipt and still claims new work without repeating submit', async () => {
     seedJob(database, { id: 'job-1', deliveryMode: DeliveryMode.DIRECT_API });
     seedJob(database, {
       id: 'job-2',
@@ -253,10 +276,12 @@ describe('PersistentSchedulerService', () => {
     const recovered = await scheduler.runNext();
 
     expect(uncertain).toEqual({ action: 'EXECUTED', jobId: 'job-1', state: 'UNKNOWN' });
-    expect(recovered).toEqual({ action: 'POLLED', jobId: 'job-1', state: 'PUBLISHED' });
-    expect(adapter.events).toEqual(['prepare', 'submit', 'poll', 'poll']);
+    expect(recovered).toEqual({ action: 'EXECUTED', jobId: 'job-2', state: 'PUBLISHED' });
+    expect(adapter.events).toEqual([
+      'prepare', 'submit', 'poll', 'poll', 'prepare', 'submit', 'poll',
+    ]);
     expect(readJob(database, 'job-1').state).toBe('PUBLISHED');
-    expect(readJob(database, 'job-2').state).toBe('APPROVED');
+    expect(readJob(database, 'job-2').state).toBe('PUBLISHED');
     expect(readAttempts(database, 'job-1')).toEqual([
       expect.objectContaining({ state: 'PUBLISHED', finished_at: timestamp }),
     ]);
@@ -299,6 +324,35 @@ describe('PersistentSchedulerService', () => {
       'submit',
       'poll',
     ]);
+  });
+
+  it('does not let a long-running remote publication starve due jobs', async () => {
+    seedJob(database, { id: 'job-a-processing', deliveryMode: DeliveryMode.DIRECT_API });
+    seedJob(database, {
+      id: 'job-z-due',
+      accountId: 'account-job-z-due',
+      deliveryMode: DeliveryMode.DIRECT_API,
+    });
+    const adapter = new FakeAdapter();
+    adapter.pollResults.push(
+      remoteStatus('PROCESSING', 'remote-processing'),
+      remoteStatus('PROCESSING', 'remote-processing'),
+      remoteStatus('PUBLISHED', 'remote-due'),
+    );
+    const scheduler = createScheduler(database, adapter, notifications);
+
+    expect(await scheduler.runNext()).toEqual({
+      action: 'EXECUTED',
+      jobId: 'job-a-processing',
+      state: 'PROCESSING',
+    });
+    expect(await scheduler.runNext()).toEqual({
+      action: 'EXECUTED',
+      jobId: 'job-z-due',
+      state: 'PUBLISHED',
+    });
+    expect(readJob(database, 'job-a-processing').state).toBe('PROCESSING');
+    expect(readJob(database, 'job-z-due').state).toBe('PUBLISHED');
   });
 });
 

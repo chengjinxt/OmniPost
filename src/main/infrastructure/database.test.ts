@@ -94,6 +94,15 @@ describe('openDatabase', () => {
           ?, NULL, ?, ?
         )
       `).run(`publish_${'c'.repeat(64)}`, now, now);
+      database.prepare(`
+        INSERT INTO publish_jobs (
+          id, plan_id, account_id, platform, variant_id, state, idempotency_key,
+          scheduled_at, created_at, updated_at
+        ) VALUES (
+          'job-orphan', NULL, 'account-1', 'YOUTUBE', NULL, 'DRAFT',
+          ?, NULL, ?, ?
+        )
+      `).run(`publish_${'d'.repeat(64)}`, now, now);
       database.pragma('user_version = 1');
 
       openDatabase(database);
@@ -108,6 +117,11 @@ describe('openDatabase', () => {
         state: 'CANCELLED',
         deliveryMode: 'UNSUPPORTED',
       }]);
+      expect(database.prepare("SELECT id FROM publish_jobs WHERE id = 'job-orphan'").get())
+        .toBeUndefined();
+      expect(database.prepare(`
+        SELECT binding_version FROM account_connections WHERE id = 'account-1'
+      `).pluck().get()).toBe(1);
       expect(database.prepare(`
         SELECT approval_hash, approved_at, content_hash
         FROM publish_plans WHERE id = 'plan-1'

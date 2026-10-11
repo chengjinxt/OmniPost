@@ -23,7 +23,12 @@ describe('PublishingService', () => {
       accountIds: ['account-1'],
       scheduledAt: null,
       platformFieldsByAccount: {
-        'account-1': { uploadUri: 'file:///content/video.mp4', privacyStatus: 'private' },
+        'account-1': {
+          uploadUri: 'file:///content/video.mp4',
+          privacyStatus: 'private',
+          __omniPostAccountBindingVersion: 999,
+          __omniPostContentHash: 'f'.repeat(64),
+        },
       },
     });
 
@@ -36,7 +41,8 @@ describe('PublishingService', () => {
         deliveryMode: 'DIRECT_API',
         scheduledAt: null,
         platformFields: {
-          __omniPostContentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          __omniPostAccountBindingVersion: 1,
+          __omniPostContentHash: expect.not.stringContaining('f'.repeat(64)),
           bodyHtml: '<p>平台简介</p>',
           bodyMarkdown: '平台简介',
           privacyStatus: 'private',
@@ -125,6 +131,7 @@ function revisionFixture() {
 }
 
 function accountFixture(): AccountConnection & {
+  bindingVersion: number;
   credentialNames: string[];
   capabilityContext: {
     qualifications: string[];
@@ -147,6 +154,7 @@ function accountFixture(): AccountConnection & {
     capabilitiesCheckedAt: null,
     createdAt: '2026-10-12T00:00:00.000Z',
     updatedAt: '2026-10-12T00:00:00.000Z',
+    bindingVersion: 1,
     credentialNames: [],
     capabilityContext: {
       qualifications: [],
@@ -173,8 +181,26 @@ function publicationFixture() {
     createdAt: '2026-10-12T01:00:00.000Z',
   });
   return {
-    createPlan: vi.fn(() => ({ plan: { id: 'plan-1' }, jobs: [] })),
-    approve: vi.fn(() => ({ plan: { id: 'plan-1' }, jobs: [] })),
+    createPlan: vi.fn(() => ({
+      plan: {
+        id: 'plan-1',
+        revisionId: revision.id,
+        variantIds: [variant.id],
+        targets: [],
+        contentHash: revision.contentHash,
+      },
+      jobs: [],
+    })),
+    approve: vi.fn(() => ({
+      plan: {
+        id: 'plan-1',
+        revisionId: revision.id,
+        variantIds: [variant.id],
+        targets: [],
+        contentHash: revision.contentHash,
+      },
+      jobs: [],
+    })),
     listJobs: vi.fn(() => []),
     listVariants: vi.fn(() => [variant]),
   };

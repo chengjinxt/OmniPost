@@ -43,6 +43,7 @@ const saveAccountSchema = z.object({
 export type SaveAccountInput = z.input<typeof saveAccountSchema>;
 
 export interface AccountSummary extends AccountConnection {
+  bindingVersion: number;
   credentialNames: string[];
   capabilityContext: CapabilityContext;
 }
@@ -59,6 +60,7 @@ interface AccountRow {
   capabilities_checked_at: string | null;
   created_at: string;
   updated_at: string;
+  binding_version: number;
 }
 
 const emptyCapabilityContext = (): CapabilityContext => ({
@@ -106,7 +108,8 @@ export class AccountRepository implements AccountConnectionSource {
           external_account_id = excluded.external_account_id,
           delivery_mode = excluded.delivery_mode,
           enabled = excluded.enabled,
-          capabilities_checked_at = excluded.capabilities_checked_at
+          capabilities_checked_at = excluded.capabilities_checked_at,
+          binding_version = account_connections.binding_version + 1
       `).run(
         id,
         input.platform,
@@ -138,7 +141,7 @@ export class AccountRepository implements AccountConnectionSource {
     const rows = this.database.prepare(`
       SELECT id, platform, external_account_id, display_name, delivery_mode,
              credential_ref, enabled, capabilities_json, capabilities_checked_at,
-             created_at, updated_at
+             created_at, updated_at, binding_version
       FROM account_connections ORDER BY created_at, id
     `).all() as AccountRow[];
     return rows.map((row) => this.toSummary(row));
@@ -155,6 +158,7 @@ export class AccountRepository implements AccountConnectionSource {
     }
     return {
       accountId,
+      bindingVersion: row.binding_version,
       credentials,
       capabilityContext: capabilityContextSchema.parse(JSON.parse(row.capabilities_json)),
     };
@@ -170,7 +174,7 @@ export class AccountRepository implements AccountConnectionSource {
     return this.database.prepare(`
       SELECT id, platform, external_account_id, display_name, delivery_mode,
              credential_ref, enabled, capabilities_json, capabilities_checked_at,
-             created_at, updated_at
+             created_at, updated_at, binding_version
       FROM account_connections WHERE id = ?
     `).get(id) as AccountRow | undefined;
   }
@@ -196,6 +200,7 @@ export class AccountRepository implements AccountConnectionSource {
     });
     return {
       ...account,
+      bindingVersion: row.binding_version,
       credentialNames: this.credentialNames(row.id),
       capabilityContext: capabilityContextSchema.parse(JSON.parse(row.capabilities_json)),
     };

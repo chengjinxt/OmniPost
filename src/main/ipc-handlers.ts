@@ -38,7 +38,7 @@ import type {
   CreateContentInput,
   ReviseContentInput,
 } from './infrastructure/content-repository.js';
-import type { PublishJob } from '../domain/index.js';
+import type { PublishJob, PublishPlan } from '../domain/index.js';
 
 export interface IpcRegistrar {
   handle(channel: string, listener: (event: unknown, ...arguments_: unknown[]) => unknown): void;
@@ -96,9 +96,14 @@ export interface PublishingIpcService {
     accountIds: string[];
     scheduledAt: string | null;
     platformFieldsByAccount?: Record<string, Record<string, unknown>> | undefined;
-  }): { plan: { id: string }; jobs: PublishJob[] };
-  approve(planId: string): { plan: { id: string }; jobs: PublishJob[] };
+  }): { plan: PublishPlanSnapshot; jobs: PublishJob[] };
+  approve(planId: string): { plan: PublishPlanSnapshot; jobs: PublishJob[] };
 }
+
+type PublishPlanSnapshot = Pick<
+  PublishPlan,
+  'id' | 'revisionId' | 'variantIds' | 'contentHash' | 'targets'
+>;
 
 interface AiProfileResult {
   configured: true;
@@ -195,9 +200,13 @@ function toPublishJobDto(job: PublishJob) {
   });
 }
 
-function toPublishPlanResult(result: { plan: { id: string }; jobs: PublishJob[] }) {
+function toPublishPlanResult(result: { plan: PublishPlanSnapshot; jobs: PublishJob[] }) {
   return publishPlanResultDtoSchema.parse({
     planId: result.plan.id,
+    revisionId: result.plan.revisionId,
+    variantIds: result.plan.variantIds,
+    contentHash: result.plan.contentHash,
+    targets: result.plan.targets,
     jobs: result.jobs.map(toPublishJobDto),
   });
 }

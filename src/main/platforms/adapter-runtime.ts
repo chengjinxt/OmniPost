@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import {
   DeliveryMode,
   Sha256Schema,
@@ -14,6 +16,23 @@ import {
   type ValidationIssue,
 } from '../../domain/index.js';
 import type { CapabilityContext } from './capability-registry.js';
+
+const platformOperationSignal = new AsyncLocalStorage<AbortSignal>();
+
+export function runPlatformOperationWithSignal<T>(
+  signal: AbortSignal,
+  operation: () => T,
+): T {
+  return platformOperationSignal.run(signal, operation);
+}
+
+export function currentPlatformOperationSignal(): AbortSignal | undefined {
+  return platformOperationSignal.getStore();
+}
+
+export function throwIfPlatformOperationAborted(): void {
+  currentPlatformOperationSignal()?.throwIfAborted();
+}
 
 export interface HttpRequest {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -35,6 +54,7 @@ export interface HttpTransport {
 
 export interface PlatformAccountRuntime {
   accountId: string;
+  bindingVersion?: number;
   credentials: Readonly<Record<string, string>>;
   capabilityContext: CapabilityContext;
 }
@@ -89,6 +109,29 @@ export function validationIssue(
   field: string | null = null,
 ): ValidationIssue {
   return { code, message, severity: 'ERROR', field };
+}
+
+export function accountBindingValidationIssue(
+  target: PublishTarget,
+  account: PlatformAccountRuntime,
+): ValidationIssue | null {
+  const plannedVersion = jsonField(
+    target.platformFields,
+    '__omniPostAccountBindingVersion',
+  );
+  if (plannedVersion === undefined) return null;
+  if (
+    typeof plannedVersion !== 'number' ||
+    !Number.isInteger(plannedVersion) ||
+    account.bindingVersion !== plannedVersion
+  ) {
+    return validationIssue(
+      'account-binding-changed',
+      'Account credentials or identity changed after this publication plan was created',
+      'accountId',
+    );
+  }
+  return null;
 }
 
 export function jsonField(
@@ -294,8 +337,13 @@ export async function requireRevision(
 export async function requireAccount(
   source: AccountConnectionSource,
   accountId: string,
+  target?: PublishTarget,
 ): Promise<PlatformAccountRuntime> {
   const account = await source.getAccount(accountId);
   if (!account) throw new Error(`Unknown platform account: ${accountId}`);
+  if (target !== undefined) {
+    const issue = accountBindingValidationIssue(target, account);
+    if (issue !== null) throw new PlatformValidationError([issue]);
+  }
   return account;
 }

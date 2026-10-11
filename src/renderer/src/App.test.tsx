@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App.js';
@@ -239,18 +239,54 @@ describe('App', () => {
       externalAccountId: null, deliveryMode: 'DIRECT_API', enabled: true,
       credentialNames: ['accessToken'], capabilitiesCheckedAt: null,
     }]);
-    const job = (state: 'AWAITING_APPROVAL' | 'APPROVED') => ({
-      id: 'job-1', planId: 'plan-1', revisionId: 'revision-video',
+    const job = (planId: string, state: 'AWAITING_APPROVAL' | 'APPROVED') => ({
+      id: `job-${planId}`, planId, revisionId: 'revision-video',
       accountId: 'account-youtube', platform: 'YOUTUBE', deliveryMode: 'DIRECT_API',
       state, scheduledAt: null, attemptCount: 0, statusMessage: null,
       updatedAt: '2026-10-12T00:00:00.000Z',
     });
-    api.createPublishPlan.mockResolvedValue({ planId: 'plan-1', jobs: [job('AWAITING_APPROVAL')] });
-    api.approvePublishPlan.mockResolvedValue({ planId: 'plan-1', jobs: [job('APPROVED')] });
-    api.generateAiVariant.mockResolvedValue({
+    const planResult = (
+      planId: string,
+      state: 'AWAITING_APPROVAL' | 'APPROVED',
+      variantId: string,
+      contentHash: string,
+      title: string,
+      bodyMarkdown: string,
+    ) => ({
+      planId,
+      revisionId: 'revision-video',
+      variantIds: [variantId],
+      contentHash,
+      targets: [{
+        accountId: 'account-youtube',
+        platform: 'YOUTUBE',
+        deliveryMode: 'DIRECT_API',
+        scheduledAt: null,
+        platformFields: { title, bodyMarkdown },
+      }],
+      jobs: [job(planId, state)],
+    });
+    api.createPublishPlan
+      .mockResolvedValueOnce(planResult(
+        'plan-1', 'AWAITING_APPROVAL', 'variant-youtube', 'e'.repeat(64),
+        'YouTube 示例标题', '平台简介',
+      ))
+      .mockResolvedValueOnce(planResult(
+        'plan-2', 'AWAITING_APPROVAL', 'variant-youtube-2', 'f'.repeat(64),
+        'YouTube 更新标题', '更新后的平台简介',
+      ));
+    api.approvePublishPlan.mockResolvedValue(planResult(
+      'plan-2', 'APPROVED', 'variant-youtube-2', 'f'.repeat(64),
+      'YouTube 更新标题', '更新后的平台简介',
+    ));
+    api.generateAiVariant.mockResolvedValueOnce({
       variantId: 'variant-youtube', revisionId: 'revision-video', platform: 'YOUTUBE',
       title: 'YouTube 示例标题', bodyMarkdown: '平台简介', contentHash: 'e'.repeat(64),
       model: 'writer-1', promptVersion: 'platform-v1', createdAt: '2026-10-12T00:00:00.000Z',
+    }).mockResolvedValueOnce({
+      variantId: 'variant-youtube-2', revisionId: 'revision-video', platform: 'YOUTUBE',
+      title: 'YouTube 更新标题', bodyMarkdown: '更新后的平台简介', contentHash: 'f'.repeat(64),
+      model: 'writer-1', promptVersion: 'platform-v1', createdAt: '2026-10-12T00:01:00.000Z',
     });
     render(<App />);
 
@@ -264,9 +300,76 @@ describe('App', () => {
     expect(await screen.findByText('AWAITING_APPROVAL')).toBeInTheDocument();
     expect(api.approvePublishPlan).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '批准此内容版本' }));
-    await waitFor(() => expect(api.approvePublishPlan).toHaveBeenCalledWith('plan-1'));
+    fireEvent.click(screen.getByRole('button', { name: '为所选平台生成 AI 版本' }));
+    expect(await screen.findByText('YouTube 更新标题')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '批准此内容版本' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '生成发布计划' }));
+    await waitFor(() => expect(api.createPublishPlan).toHaveBeenCalledTimes(2));
+    const approvalSnapshot = screen.getByRole('region', { name: '批准载荷快照' });
+    expect(within(approvalSnapshot).getByRole('heading', { name: 'YouTube 更新标题' })).toBeInTheDocument();
+    expect(within(approvalSnapshot).getByText('更新后的平台简介')).toBeInTheDocument();
+    expect(within(approvalSnapshot).getByText('f'.repeat(64))).toBeInTheDocument();
+    const approvalButton = screen.getByRole('button', { name: '批准此内容版本' });
+    await waitFor(() => expect(approvalButton).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('平台字段 JSON'), {
+      target: { value: '{ "description": "changed" }' },
+    });
+    expect(approvalButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('平台字段 JSON'), { target: { value: '{}' } });
+    expect(approvalButton).toBeEnabled();
+
+    fireEvent.click(approvalButton);
+    await waitFor(() => expect(api.approvePublishPlan).toHaveBeenCalledWith('plan-2'));
     expect(await screen.findByText('APPROVED')).toBeInTheDocument();
+  });
+
+  it('shows the exact persisted target snapshot before approving after restart', async () => {
+    api.listContent.mockResolvedValue([{
+      itemId: 'item-article', revisionId: 'revision-article', revisionNumber: 1,
+      kind: 'ARTICLE', title: '本地原稿', bodyMarkdown: '本地正文', contentHash: 'a'.repeat(64),
+      updatedAt: '2026-10-12T00:00:00.000Z',
+    }]);
+    api.listAccounts.mockResolvedValue([{
+      id: 'account-zhihu', platform: 'ZHIHU', displayName: '知乎账号',
+      externalAccountId: null, deliveryMode: 'DIRECT_API', enabled: true,
+      credentialNames: ['accessToken'], capabilitiesCheckedAt: null,
+    }]);
+    api.createPublishPlan.mockResolvedValue({
+      planId: 'plan-restored',
+      revisionId: 'revision-article',
+      variantIds: ['variant-persisted-before-restart'],
+      contentHash: 'c'.repeat(64),
+      targets: [{
+        accountId: 'account-zhihu',
+        platform: 'ZHIHU',
+        deliveryMode: 'DIRECT_API',
+        scheduledAt: null,
+        platformFields: {
+          title: '重启前保存的平台标题',
+          bodyMarkdown: '重启前保存的平台正文',
+        },
+      }],
+      jobs: [{
+        id: 'job-restored', planId: 'plan-restored', revisionId: 'revision-article',
+        accountId: 'account-zhihu', platform: 'ZHIHU', deliveryMode: 'DIRECT_API',
+        state: 'AWAITING_APPROVAL', scheduledAt: null, attemptCount: 0, statusMessage: null,
+        updatedAt: '2026-10-12T00:00:00.000Z',
+      }],
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '内容库' }));
+    fireEvent.click(await screen.findByRole('button', { name: '发布 本地原稿' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '知乎账号' }));
+    fireEvent.click(screen.getByRole('button', { name: '生成发布计划' }));
+
+    const snapshot = await screen.findByRole('region', { name: '批准载荷快照' });
+    expect(within(snapshot).getByRole('heading', { name: '重启前保存的平台标题' })).toBeInTheDocument();
+    expect(within(snapshot).getByText('重启前保存的平台正文')).toBeInTheDocument();
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: '批准此内容版本' }),
+    ).toBeEnabled());
   });
 
   it('offers Medium export and editor handoff without browser filling or submission', async () => {

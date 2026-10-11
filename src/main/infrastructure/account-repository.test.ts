@@ -41,6 +41,7 @@ describe('AccountRepository', () => {
 
     expect(account).toMatchObject({
       id: 'account-1',
+      bindingVersion: 1,
       platform: 'YOUTUBE',
       displayName: '主频道',
       capabilityContext: {
@@ -89,7 +90,7 @@ describe('AccountRepository', () => {
       deliveryMode: 'DIRECT_API',
       credentials: { accessToken: 'old', refreshToken: 'remove-me' },
     });
-    repository.save({
+    const updated = repository.save({
       id: 'account-1',
       platform: 'YOUTUBE',
       displayName: '频道',
@@ -98,9 +99,11 @@ describe('AccountRepository', () => {
       credentials: { accessToken: 'new' },
     });
 
+    expect(updated.bindingVersion).toBe(2);
     expect(database.prepare('SELECT name FROM secrets ORDER BY name').pluck().all())
       .toEqual(['accessToken']);
     await expect(repository.getAccount('account-1')).resolves.toMatchObject({
+      bindingVersion: 2,
       credentials: { accessToken: 'new' },
     });
   });

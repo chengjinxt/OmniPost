@@ -32,6 +32,7 @@ interface RevisionLookup {
 
 interface AccountList {
   list(): Array<AccountConnection & {
+    bindingVersion: number;
     credentialNames: string[];
     capabilityContext?: CapabilityContext;
   }>;
@@ -48,8 +49,14 @@ interface PublicationStore {
       scheduledAt: string | null;
       platformFields: JsonObject;
     }>;
-  }): { plan: Pick<PublishPlan, 'id'>; jobs: PublishJob[] };
-  approve(planId: string, approvedBy: string): { plan: Pick<PublishPlan, 'id'>; jobs: PublishJob[] };
+  }): {
+    plan: Pick<PublishPlan, 'id' | 'revisionId' | 'variantIds' | 'contentHash' | 'targets'>;
+    jobs: PublishJob[];
+  };
+  approve(planId: string, approvedBy: string): {
+    plan: Pick<PublishPlan, 'id' | 'revisionId' | 'variantIds' | 'contentHash' | 'targets'>;
+    jobs: PublishJob[];
+  };
   listJobs(planId?: string): PublishJob[];
   listVariants(revisionId: string): PlatformVariant[];
 }
@@ -104,13 +111,14 @@ export class PublishingService {
         deliveryMode: chooseDeliveryMode(account.deliveryMode, resolved.deliveryMode, context),
         scheduledAt: request.scheduledAt,
         platformFields: {
-          __omniPostContentHash: variant?.contentHash ?? revision.contentHash,
           title,
           bodyMarkdown,
           bodyHtml: renderMarkdownHtml(bodyMarkdown),
           ...(account.platform === 'ZHIHU' ? { userConfirmed: true } : {}),
           ...(variant?.platformFields ?? {}),
           ...explicitFields,
+          __omniPostAccountBindingVersion: account.bindingVersion,
+          __omniPostContentHash: variant?.contentHash ?? revision.contentHash,
         },
       };
     });

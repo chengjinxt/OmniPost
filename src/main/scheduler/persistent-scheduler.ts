@@ -17,6 +17,7 @@ import {
   type SubmissionReceipt,
 } from '../../domain/index.js';
 import type { PersistentJobQueue } from '../infrastructure/job-queue.js';
+import { runPlatformOperationWithSignal } from '../platforms/adapter-runtime.js';
 
 export interface AdapterRegistry {
   get(platform: string): PlatformAdapter | undefined;
@@ -88,10 +89,10 @@ interface AttemptEnvelope {
   assistedSession?: AssistedSession;
 }
 
-class SubmissionTimeoutError extends Error {
+class PlatformRequestTimeoutError extends Error {
   constructor(timeoutMs: number) {
-    super(`Platform submission timed out after ${timeoutMs}ms`);
-    this.name = 'SubmissionTimeoutError';
+    super(`Platform request timed out after ${timeoutMs}ms`);
+    this.name = 'PlatformRequestTimeoutError';
   }
 }
 
@@ -102,15 +103,24 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+async function withTimeout<T>(operation: () => Promise<T>, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => reject(new SubmissionTimeoutError(timeoutMs)), timeoutMs);
+    timeout = setTimeout(() => {
+      const error = new PlatformRequestTimeoutError(timeoutMs);
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
   });
   try {
-    return await Promise.race([promise, deadline]);
+    return await runPlatformOperationWithSignal(
+      controller.signal,
+      () => Promise.race([operation(), deadline]),
+    );
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
+    if (!controller.signal.aborted) controller.abort();
   }
 }
 
@@ -139,7 +149,6 @@ export class PersistentSchedulerService {
 
   public async runNext(): Promise<SchedulerRunResult | null> {
     const resumed = await this.pollPersistedReceipt();
-    if (resumed && resumed.state !== JobState.UNKNOWN) return resumed;
 
     const claimed = this.queue.claimNextDue(
       this.workerId,
@@ -180,7 +189,10 @@ export class PersistentSchedulerService {
 
     let prepared: PreparedPublication;
     try {
-      prepared = await adapter.prepare(job.revisionId, job.target);
+      prepared = await withTimeout(
+        () => adapter.prepare(job.revisionId, job.target),
+        this.submitTimeoutMs,
+      );
       this.updateAttempt(attemptId, JobState.PREPARING, { prepared });
     } catch (error) {
       const message = `Preparation failed: ${errorMessage(error)}`;
@@ -200,7 +212,10 @@ export class PersistentSchedulerService {
       let statusMessage = message;
       if (adapter.openAssistedFlow) {
         try {
-          assistedSession = await adapter.openAssistedFlow(prepared.id);
+          assistedSession = await withTimeout(
+            () => adapter.openAssistedFlow!(prepared.id),
+            this.submitTimeoutMs,
+          );
         } catch (error) {
           statusMessage = `${message}: ${errorMessage(error)}`;
         }
@@ -220,7 +235,7 @@ export class PersistentSchedulerService {
     this.markSubmissionStarted(job, attemptId, { prepared });
     let receipt: SubmissionReceipt;
     try {
-      receipt = await withTimeout(adapter.submit(prepared.id), this.submitTimeoutMs);
+      receipt = await withTimeout(() => adapter.submit(prepared.id), this.submitTimeoutMs);
       this.persistReceipt(job, attemptId, prepared, receipt);
     } catch (error) {
       const message = errorMessage(error);
@@ -230,7 +245,7 @@ export class PersistentSchedulerService {
         JobState.UNKNOWN,
         message,
         { prepared },
-        error instanceof SubmissionTimeoutError ? 'SUBMIT_TIMEOUT' : 'SUBMIT_UNCERTAIN',
+        error instanceof PlatformRequestTimeoutError ? 'SUBMIT_TIMEOUT' : 'SUBMIT_UNCERTAIN',
       );
       await this.notifications.notify({
         kind: 'SUBMISSION_UNKNOWN',
@@ -261,7 +276,10 @@ export class PersistentSchedulerService {
     }
 
     try {
-      const status = await adapter.poll(receipt);
+      const status = await withTimeout(
+        () => adapter.poll!(receipt),
+        this.submitTimeoutMs,
+      );
       this.applyRemoteStatus(job.id, attemptId, status, { prepared, receipt }, true);
       return { action: 'EXECUTED', jobId: job.id, state: status.state };
     } catch (error) {
@@ -302,7 +320,10 @@ export class PersistentSchedulerService {
       const adapter = this.adapters.get(job.platform);
       if (!adapter?.poll) continue;
       try {
-        const status = await adapter.poll(receiptResult.data);
+        const status = await withTimeout(
+          () => adapter.poll!(receiptResult.data),
+          this.submitTimeoutMs,
+        );
         this.applyRemoteStatus(job.id, attempt.id, status, envelope, false);
         return { action: 'POLLED', jobId: job.id, state: status.state };
       } catch (error) {

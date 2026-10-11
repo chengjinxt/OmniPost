@@ -73,8 +73,7 @@ export class NonOverlappingSchedulerLoop {
   private readonly intervals: IntervalPort;
   private readonly onError: (error: unknown) => void;
   private intervalHandle: object | undefined;
-  private intervalTask: Promise<void> | undefined;
-  private running = false;
+  private activeTask: Promise<SchedulerTickResult> | undefined;
 
   public constructor(private readonly options: NonOverlappingSchedulerLoopOptions) {
     if (!Number.isFinite(options.intervalMs) || options.intervalMs <= 0) {
@@ -87,13 +86,7 @@ export class NonOverlappingSchedulerLoop {
   public start(): void {
     if (this.intervalHandle !== undefined) return;
     this.intervalHandle = this.intervals.set(() => {
-      const task = this.tick()
-        .then(() => undefined)
-        .catch((error: unknown) => this.onError(error));
-      this.intervalTask = task;
-      void task.finally(() => {
-        if (this.intervalTask === task) this.intervalTask = undefined;
-      });
+      void this.tick().catch((error: unknown) => this.onError(error));
     }, this.options.intervalMs);
   }
 
@@ -103,18 +96,32 @@ export class NonOverlappingSchedulerLoop {
     this.intervalHandle = undefined;
   }
 
-  public async tick(): Promise<SchedulerTickResult> {
-    if (this.running) return { status: 'BUSY' };
-    this.running = true;
-    try {
-      return { status: 'RAN', result: await this.options.runner.runNext() };
-    } finally {
-      this.running = false;
+  public tick(): Promise<SchedulerTickResult> {
+    if (this.activeTask !== undefined) {
+      return Promise.resolve({ status: 'BUSY' });
     }
+    const task = this.runTick();
+    this.activeTask = task;
+    void task.then(
+      () => {
+        if (this.activeTask === task) this.activeTask = undefined;
+      },
+      () => {
+        if (this.activeTask === task) this.activeTask = undefined;
+      },
+    );
+    return task;
   }
 
   public whenIdle(): Promise<void> {
-    return this.intervalTask ?? Promise.resolve();
+    return this.activeTask?.then(
+      () => undefined,
+      () => undefined,
+    ) ?? Promise.resolve();
+  }
+
+  private async runTick(): Promise<SchedulerTickResult> {
+    return { status: 'RAN', result: await this.options.runner.runNext() };
   }
 }
 
@@ -152,7 +159,7 @@ export class PublishingRuntime {
     this.started = true;
     const recovery = this.options.recovery.recoverAfterRestart(this.now());
     await this.options.loop.tick();
-    this.options.loop.start();
+    if (this.started) this.options.loop.start();
     return recovery;
   }
 

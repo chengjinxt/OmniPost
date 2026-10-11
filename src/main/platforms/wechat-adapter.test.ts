@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ContentKind, DeliveryMode } from '../../domain/index.js';
 import {
@@ -7,6 +7,7 @@ import {
   type HttpRequest,
   type HttpResponse,
   type HttpTransport,
+  runPlatformOperationWithSignal,
 } from './adapter-runtime.js';
 import { WeChatAdapter } from './wechat-adapter.js';
 
@@ -49,12 +50,13 @@ const revisionSource: ContentRevisionSource = {
   },
 };
 
-function createAccountSource(verified: boolean): AccountConnectionSource {
+function createAccountSource(verified: boolean, bindingVersion = 1): AccountConnectionSource {
   return {
     async getAccount(accountId) {
       if (accountId !== 'wechat-account') return null;
       return {
         accountId,
+        bindingVersion,
         credentials: { accessToken: 'wechat-test-token' },
         capabilityContext: {
           qualifications: verified ? ['WECHAT_VERIFIED_ENTERPRISE'] : [],
@@ -111,6 +113,8 @@ describe('WeChatAdapter', () => {
     expect(await adapter.validate('revision-1', directTarget)).toEqual([]);
 
     const prepared = await adapter.prepare('revision-1', directTarget);
+    expect(transport.requests).toEqual([]);
+    const receipt = await adapter.submit(prepared.id);
     expect(transport.requests[0]).toEqual({
       method: 'POST',
       url: 'https://api.weixin.qq.com/cgi-bin/draft/add?access_token=wechat-test-token',
@@ -132,7 +136,6 @@ describe('WeChatAdapter', () => {
       idempotencyKey: prepared.idempotencyKey,
     });
 
-    const receipt = await adapter.submit(prepared.id);
     expect(transport.requests[1]).toEqual({
       method: 'POST',
       url: 'https://api.weixin.qq.com/cgi-bin/freepublish/submit?access_token=wechat-test-token',
@@ -204,6 +207,38 @@ describe('WeChatAdapter', () => {
     });
   });
 
+  it('does not continue from draft creation to publication after cancellation', async () => {
+    let releaseDraft!: (value: HttpResponse) => void;
+    const firstResponse = new Promise<HttpResponse>((resolve) => { releaseDraft = resolve; });
+    const requests: HttpRequest[] = [];
+    const transport: HttpTransport = {
+      async send(request) {
+        requests.push(request);
+        if (requests.length > 1) throw new Error('freepublish must not be called after cancellation');
+        return firstResponse;
+      },
+    };
+    const adapter = new WeChatAdapter({
+      transport,
+      revisions: revisionSource,
+      accounts: createAccountSource(true),
+      now: () => NOW,
+    });
+    const prepared = await adapter.prepare('revision-1', directTarget);
+    const controller = new AbortController();
+    const submission = runPlatformOperationWithSignal(
+      controller.signal,
+      () => adapter.submit(prepared.id),
+    );
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+
+    controller.abort(new Error('scheduler deadline reached'));
+    releaseDraft({ status: 200, body: { media_id: 'draft-created-after-timeout' } });
+
+    await expect(submission).rejects.toThrow(/scheduler deadline reached|aborted/i);
+    expect(requests).toHaveLength(1);
+  });
+
   it('prepares an assisted browser handoff without calling the draft API', async () => {
     const transport = new FakeTransport();
     const adapter = new WeChatAdapter({
@@ -231,6 +266,31 @@ describe('WeChatAdapter', () => {
       preparedId: prepared.id,
       status: 'OPEN',
     });
+  });
+
+  it('rejects a plan after the bound account credentials have changed', async () => {
+    const transport = new FakeTransport();
+    const adapter = new WeChatAdapter({
+      transport,
+      revisions: revisionSource,
+      accounts: createAccountSource(true, 2),
+      now: () => NOW,
+    });
+    const target = {
+      ...directTarget,
+      platformFields: {
+        ...directTarget.platformFields,
+        __omniPostAccountBindingVersion: 1,
+      },
+    };
+
+    expect(await adapter.validate('revision-1', target)).toContainEqual(
+      expect.objectContaining({ code: 'account-binding-changed' }),
+    );
+    await expect(adapter.prepare('revision-1', target)).rejects.toMatchObject({
+      name: 'PlatformValidationError',
+    });
+    expect(transport.requests).toEqual([]);
   });
 
   it('rejects video content before creating a remote draft', async () => {

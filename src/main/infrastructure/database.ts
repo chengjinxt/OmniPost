@@ -264,6 +264,31 @@ const migrations: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 5,
+    up: `
+      DELETE FROM publish_jobs
+      WHERE plan_id IS NULL OR revision_id IS NULL;
+
+      ALTER TABLE account_connections
+      ADD COLUMN binding_version INTEGER NOT NULL DEFAULT 1 CHECK (binding_version > 0);
+
+      UPDATE publish_jobs
+      SET state = CASE
+            WHEN state IN ('SUBMITTED', 'PROCESSING', 'UNKNOWN') THEN 'NEEDS_ACTION'
+            WHEN state IN ('PUBLISHED', 'REJECTED', 'FAILED', 'CANCELLED', 'NEEDS_ACTION') THEN state
+            ELSE 'CANCELLED'
+          END,
+          lease_owner = NULL,
+          lease_until = NULL,
+          status_message = 'Legacy account binding quarantined during database migration';
+
+      UPDATE publish_plans
+      SET approval_hash = NULL,
+          approved_at = NULL,
+          approved_by = NULL;
+    `,
+  },
 ];
 
 export const DATABASE_VERSION = migrations.at(-1)?.version ?? 0;

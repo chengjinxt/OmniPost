@@ -13,6 +13,7 @@ import type {
   HttpResponse,
   HttpTransport,
 } from '../platforms/index.js';
+import { runPlatformOperationWithSignal } from '../platforms/index.js';
 import {
   FetchHttpTransport,
   createLaunchAdapterRegistry,
@@ -123,6 +124,27 @@ describe('FetchHttpTransport', () => {
 
     expect(textResponse.body).toBe('accepted');
     expect(emptyResponse.body).toBeNull();
+  });
+
+  it('forwards the scheduler operation signal to fetch', async () => {
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const transport = new FetchHttpTransport(async (_input, init) => {
+      signals.push(init?.signal);
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const controller = new AbortController();
+
+    await runPlatformOperationWithSignal(controller.signal, () => transport.send({
+      method: 'GET',
+      url: 'https://example.invalid/status',
+      headers: {},
+      idempotencyKey: 'status-check',
+    }));
+
+    expect(signals).toEqual([controller.signal]);
   });
 });
 

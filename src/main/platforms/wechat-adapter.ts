@@ -14,6 +14,7 @@ import { resolvePlatformCapability } from './capability-registry.js';
 import {
   AdapterRuntimeStore,
   PlatformValidationError,
+  accountBindingValidationIssue,
   booleanField,
   buildAssistedSession,
   buildPreparedPublication,
@@ -25,6 +26,7 @@ import {
   requireRevision,
   responseObject,
   stringField,
+  throwIfPlatformOperationAborted,
   validationIssue,
   type AdapterDependencies,
 } from './adapter-runtime.js';
@@ -100,6 +102,8 @@ export class WeChatAdapter implements PlatformAdapter {
 
     if (!revision) return [validationIssue('revision-not-found', 'Content revision not found')];
     if (!account) return [validationIssue('account-not-found', 'WeChat account not found')];
+    const accountBindingIssue = accountBindingValidationIssue(target, account);
+    if (accountBindingIssue !== null) issues.push(accountBindingIssue);
     if (target.platform !== PLATFORM) {
       issues.push(validationIssue('platform-mismatch', 'Target platform must be wechat'));
     }
@@ -150,7 +154,7 @@ export class WeChatAdapter implements PlatformAdapter {
     if (issues.length > 0) throw new PlatformValidationError(issues);
 
     const revision = await requireRevision(this.#revisions, revisionId);
-    const account = await requireAccount(this.#accounts, target.accountId);
+    const account = await requireAccount(this.#accounts, target.accountId, target);
     const prepared = buildPreparedPublication(revision, target, this.#now());
     const payload: WeChatPayload = {
       articles: [
@@ -175,47 +179,42 @@ export class WeChatAdapter implements PlatformAdapter {
         },
       ],
     };
-    let remoteDraftId: string | null = null;
-    if (
-      target.deliveryMode === DeliveryMode.DIRECT_API ||
-      target.deliveryMode === DeliveryMode.REMOTE_DRAFT
-    ) {
-      const accessToken = account.credentials.accessToken ?? '';
-      const response = responseObject(
-        await this.#transport.send({
-          method: 'POST',
-          url: `${API_ROOT}/draft/add?access_token=${encodeURIComponent(accessToken)}`,
-          headers: { 'content-type': 'application/json' },
-          body: payload,
-          idempotencyKey: prepared.idempotencyKey,
-        }),
-      );
-      remoteDraftId = typeof response.media_id === 'string' ? response.media_id : null;
-      if (!remoteDraftId) throw new Error('WeChat draft response did not include media_id');
-    }
-
     this.#store.savePrepared({
       prepared,
       revision,
       account,
       payload,
-      remoteDraftId,
+      remoteDraftId: null,
     });
     return prepared;
   }
 
   async submit(preparedId: string): Promise<SubmissionReceipt> {
     const stored = this.#store.getPrepared(preparedId);
-    let remoteId = stored.remoteDraftId;
+    const accessToken = stored.account.credentials.accessToken ?? '';
+    const draftResponse = responseObject(
+      await this.#transport.send({
+        method: 'POST',
+        url: `${API_ROOT}/draft/add?access_token=${encodeURIComponent(accessToken)}`,
+        headers: { 'content-type': 'application/json' },
+        body: stored.payload,
+        idempotencyKey: stored.prepared.idempotencyKey,
+      }),
+    );
+    const remoteDraftId = typeof draftResponse.media_id === 'string'
+      ? draftResponse.media_id
+      : null;
+    if (!remoteDraftId) throw new Error('WeChat draft response did not include media_id');
+    let remoteId: string | null = remoteDraftId;
 
     if (stored.prepared.target.deliveryMode === DeliveryMode.DIRECT_API) {
-      const accessToken = stored.account.credentials.accessToken ?? '';
+      throwIfPlatformOperationAborted();
       const response = responseObject(
         await this.#transport.send({
           method: 'POST',
           url: `${API_ROOT}/freepublish/submit?access_token=${encodeURIComponent(accessToken)}`,
           headers: { 'content-type': 'application/json' },
-          body: { media_id: stored.remoteDraftId },
+          body: { media_id: remoteDraftId },
           idempotencyKey: stored.prepared.idempotencyKey,
         }),
       );
