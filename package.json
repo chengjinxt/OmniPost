@@ -16,7 +16,11 @@
     "assets:generate": "node scripts/generate-icons.mjs",
     "dev": "node --experimental-strip-types scripts/check-toolchain.ts && electron-vite dev",
     "build": "node --experimental-strip-types scripts/check-toolchain.ts && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
-    "package": "node --experimental-strip-types scripts/check-toolchain.ts && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build && electron-builder --win nsis",
+    "test:e2e": "node --experimental-strip-types scripts/check-toolchain.ts && electron-vite build && playwright test --config=tests/e2e/playwright.config.ts",
+    "test:browser:e2e": "node --experimental-strip-types scripts/check-toolchain.ts && cross-env OMNIPOST_BROWSER_E2E=1 vitest run src/main/browser/assisted-browser-engine.test.ts --maxWorkers=1",
+    "package:dir": "node --experimental-strip-types scripts/check-toolchain.ts && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build && electron-builder --win dir",
+    "package": "node --experimental-strip-types scripts/check-toolchain.ts && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build && electron-builder --win nsis && node --experimental-strip-types scripts/package-smoke/run.ts",
+    "package:smoke": "node --experimental-strip-types scripts/check-toolchain.ts && node --experimental-strip-types scripts/package-smoke/run.ts",
     "test": "node --experimental-strip-types scripts/check-toolchain.ts && vitest run",
     "test:watch": "vitest",
     "lint": "node --experimental-strip-types scripts/check-toolchain.ts && eslint .",
@@ -24,6 +28,7 @@
     "verify": "node --experimental-strip-types scripts/check-toolchain.ts && eslint . && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && vitest run && electron-vite build"
   },
   "dependencies": {
+    "@tiptap/markdown": "3.31.4",
     "@tiptap/react": "3.31.4",
     "@tiptap/starter-kit": "3.31.4",
     "better-sqlite3": "13.0.3",
@@ -45,7 +50,6 @@
     "zod": "4.6.6"
   },
   "devDependencies": {
-    "@electron/rebuild": "4.2.1",
     "@eslint/js": "10.0.1",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",
@@ -71,9 +75,25 @@
   "build": {
     "appId": "com.omnipost.desktop",
     "productName": "OmniPost",
+    "asar": true,
+    "npmRebuild": false,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*",
+      "node_modules/ffmpeg-static/**/*",
+      "node_modules/ffprobe-static/**/*",
+      "node_modules/playwright-core/**/*"
+    ],
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "resources/runtime/browser-runtime.json",
+        "to": "runtime/browser-runtime.json"
+      }
+    ],
     "files": [
       "out/**/*",
       "resources/**/*",
@@ -83,11 +103,18 @@
       "target": [
         "nsis"
       ],
-      "icon": "resources/icons/icon.ico"
+      "icon": "resources/icons/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "perMachine": false,
+      "allowElevation": false,
+      "packElevateHelper": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": false
     }
   }
 }

@@ -13,8 +13,13 @@ export default defineConfig({
   },
   preload: {
     build: {
+      externalizeDeps: false,
       rollupOptions: {
         input: resolve('src/preload/index.ts'),
+        output: {
+          format: 'cjs',
+          entryFileNames: 'index.js',
+        },
       },
     },
   },
