@@ -307,8 +307,9 @@ export class PersistentSchedulerService {
       SELECT id
       FROM publish_jobs
       WHERE state IN ('UNKNOWN', 'SUBMITTED', 'PROCESSING')
-      ORDER BY CASE state WHEN 'UNKNOWN' THEN 0 WHEN 'SUBMITTED' THEN 1 ELSE 2 END,
-               updated_at, id
+      ORDER BY updated_at,
+               CASE state WHEN 'UNKNOWN' THEN 0 WHEN 'SUBMITTED' THEN 1 ELSE 2 END,
+               id
     `).pluck().all() as string[];
 
     for (const jobId of jobIds) {

@@ -102,21 +102,27 @@ export class PublishingService {
         context,
       });
       const variant = variants.find((entry) => entry.platform === account.platform);
-      const title = variant?.title ?? revision.title;
-      const bodyMarkdown = variant?.bodyMarkdown ?? revision.bodyMarkdown;
       const explicitFields = request.platformFieldsByAccount?.[account.id] ?? {};
+      const platformFields = normalizePlatformFields({
+        platform: account.platform,
+        contentKind: revision.kind,
+        revisionTitle: revision.title,
+        revisionBodyMarkdown: revision.bodyMarkdown,
+        variantTitle: variant?.title ?? null,
+        variantBodyMarkdown: variant?.bodyMarkdown ?? null,
+        variantFields: JSON.parse(
+          JSON.stringify(variant?.platformFields ?? {}),
+        ) as JsonObject,
+        explicitFields,
+        scheduledAt: request.scheduledAt,
+      });
       return {
         accountId: account.id,
         platform: account.platform,
         deliveryMode: chooseDeliveryMode(account.deliveryMode, resolved.deliveryMode, context),
         scheduledAt: request.scheduledAt,
         platformFields: {
-          title,
-          bodyMarkdown,
-          bodyHtml: renderMarkdownHtml(bodyMarkdown),
-          ...(account.platform === 'ZHIHU' ? { userConfirmed: true } : {}),
-          ...(variant?.platformFields ?? {}),
-          ...explicitFields,
+          ...platformFields,
           __omniPostAccountBindingVersion: account.bindingVersion,
           __omniPostContentHash: variant?.contentHash ?? revision.contentHash,
         },
@@ -177,4 +183,77 @@ function renderMarkdownHtml(markdown: string): string {
     .use(remarkRehype)
     .use(rehypeStringify)
     .processSync(markdown));
+}
+
+function normalizePlatformFields(input: {
+  platform: string;
+  contentKind: ContentRevision['kind'];
+  revisionTitle: string;
+  revisionBodyMarkdown: string;
+  variantTitle: string | null;
+  variantBodyMarkdown: string | null;
+  variantFields: JsonObject;
+  explicitFields: JsonObject;
+  scheduledAt: string | null;
+}): JsonObject {
+  const fields: JsonObject = {
+    ...input.variantFields,
+    ...input.explicitFields,
+  };
+  const title = nonEmptyString(
+    fields.title,
+    nonEmptyString(input.variantTitle, input.revisionTitle),
+  );
+  const bodyMarkdown = nonEmptyString(
+    fields.bodyMarkdown,
+    nonEmptyString(input.variantBodyMarkdown, input.revisionBodyMarkdown),
+  );
+  fields.title = title;
+  fields.bodyMarkdown = bodyMarkdown;
+  fields.bodyHtml = nonEmptyString(fields.bodyHtml, renderMarkdownHtml(bodyMarkdown));
+
+  if (input.platform === 'WECHAT_OFFICIAL_ACCOUNT') {
+    fields.author = nonEmptyString(fields.author, '');
+    fields.digest = nonEmptyString(fields.digest, '');
+    fields.contentSourceUrl = nonEmptyString(fields.contentSourceUrl, '');
+    fields.coverMediaId = nonEmptyString(fields.coverMediaId, '');
+    fields.openComments = fields.openComments === true;
+    fields.onlyFansCanComment = fields.onlyFansCanComment === true;
+  } else if (input.platform === 'DOUYIN') {
+    fields.text = nonEmptyString(fields.text, title);
+    fields.remoteMediaIds = stringValues(fields.remoteMediaIds);
+  } else if (input.platform === 'YOUTUBE') {
+    fields.uploadUri = nonEmptyString(fields.uploadUri, '');
+    fields.description = nonEmptyString(fields.description, bodyMarkdown);
+    fields.tags = stringValues(fields.tags);
+    fields.categoryId = nonEmptyString(fields.categoryId, '22');
+    fields.privacyStatus = input.scheduledAt === null
+      ? nonEmptyString(fields.privacyStatus, 'private')
+      : 'private';
+  } else if (input.platform === 'ZHIHU') {
+    fields.commentPermission = nonEmptyString(fields.commentPermission, 'all');
+    fields.tableOfContentsEnabled = fields.tableOfContentsEnabled === true;
+    fields.userConfirmed = true;
+    fields.topicTokens = stringValues(fields.topicTokens);
+    fields.imageUrls = stringValues(fields.imageUrls);
+    if (
+      typeof fields.creationStatement !== 'string' ||
+      fields.creationStatement.length === 0 ||
+      (input.contentKind === 'IMAGE_POST' && fields.creationStatement !== 'ai_creation')
+    ) {
+      delete fields.creationStatement;
+    }
+  }
+
+  return fields;
+}
+
+function nonEmptyString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.length > 0 ? value : fallback;
+}
+
+function stringValues(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 }

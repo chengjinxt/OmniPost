@@ -354,6 +354,40 @@ describe('PersistentSchedulerService', () => {
     expect(readJob(database, 'job-a-processing').state).toBe('PROCESSING');
     expect(readJob(database, 'job-z-due').state).toBe('PUBLISHED');
   });
+
+  it('polls the least recently checked receipt regardless of remote state', async () => {
+    seedJob(database, { id: 'job-a-unknown', deliveryMode: DeliveryMode.DIRECT_API });
+    seedJob(database, {
+      id: 'job-z-processing',
+      accountId: 'account-job-z-processing',
+      deliveryMode: DeliveryMode.DIRECT_API,
+    });
+    const adapter = new FakeAdapter();
+    adapter.pollResults.push(
+      new Error('first status lookup failed'),
+      new Error('persisted unknown still unavailable'),
+      remoteStatus('PROCESSING', 'remote-processing'),
+      remoteStatus('PUBLISHED', 'remote-processing'),
+    );
+    const scheduler = createScheduler(database, adapter, notifications);
+
+    await scheduler.runNext();
+    await scheduler.runNext();
+    database.prepare(`
+      UPDATE publish_jobs SET updated_at = ? WHERE id = 'job-a-unknown'
+    `).run('2026-10-12T08:00:02.000Z');
+    database.prepare(`
+      UPDATE publish_jobs SET updated_at = ? WHERE id = 'job-z-processing'
+    `).run('2026-10-12T08:00:01.000Z');
+
+    expect(await scheduler.runNext()).toEqual({
+      action: 'POLLED',
+      jobId: 'job-z-processing',
+      state: 'PUBLISHED',
+    });
+    expect(readJob(database, 'job-a-unknown').state).toBe('UNKNOWN');
+    expect(readJob(database, 'job-z-processing').state).toBe('PUBLISHED');
+  });
 });
 
 function createScheduler(
