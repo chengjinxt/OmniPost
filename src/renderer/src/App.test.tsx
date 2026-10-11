@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App.js';
@@ -393,6 +393,32 @@ describe('App', () => {
     }));
     fireEvent.click(screen.getByRole('button', { name: '打开 Medium 编辑页' }));
     expect(api.openManualEditor).toHaveBeenCalledWith('MEDIUM');
+  });
+
+  it('refreshes background scheduler state while the window remains open', async () => {
+    vi.useFakeTimers();
+    try {
+      const job = (state: 'APPROVED' | 'PUBLISHED') => ({
+        id: 'job-live', planId: 'plan-live', revisionId: 'revision-live',
+        accountId: 'account-live', platform: 'YOUTUBE', deliveryMode: 'DIRECT_API',
+        state, scheduledAt: null, attemptCount: state === 'APPROVED' ? 0 : 1,
+        statusMessage: null, updatedAt: '2026-10-12T00:00:00.000Z',
+      });
+      api.listPublishJobs
+        .mockResolvedValueOnce([job('APPROVED')])
+        .mockResolvedValue([job('PUBLISHED')]);
+      render(<App />);
+      await act(async () => { await Promise.resolve(); });
+      fireEvent.click(screen.getByRole('button', { name: '任务队列' }));
+      expect(screen.getByText('APPROVED')).toBeInTheDocument();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+
+      expect(screen.getByText('PUBLISHED')).toBeInTheDocument();
+      expect(api.listPublishJobs).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows redacted diagnostics and requires explicit export or folder actions', async () => {

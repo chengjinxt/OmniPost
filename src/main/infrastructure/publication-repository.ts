@@ -208,7 +208,40 @@ export class PublicationRepository {
       });
     });
 
-    this.database.transaction(() => {
+    return this.database.transaction((): StoredPublicationPlan => {
+      const collisions = jobs.map((job) => this.database.prepare(`
+        SELECT plan_id, state
+        FROM publish_jobs
+        WHERE account_id = ? AND platform = ? AND idempotency_key = ?
+      `).get(
+        job.accountId,
+        job.platform,
+        job.idempotencyKey,
+      ) as { plan_id: string; state: string } | undefined);
+      const existing = collisions.filter(
+        (entry): entry is { plan_id: string; state: string } => entry !== undefined,
+      );
+      if (existing.length > 0) {
+        const existingPlanId = existing[0]?.plan_id;
+        const canResume = existing.length === jobs.length &&
+          existingPlanId !== undefined &&
+          existing.every((entry) => (
+            entry.plan_id === existingPlanId && entry.state === 'AWAITING_APPROVAL'
+          ));
+        if (canResume) {
+          const existingPlan = this.getPlan(existingPlanId);
+          if (
+            existingPlan.revisionId === plan.revisionId &&
+            existingPlan.contentHash === plan.contentHash
+          ) {
+            return { plan: existingPlan, jobs: this.listJobs(existingPlanId) };
+          }
+        }
+        throw new Error(
+          'An identical publication already exists and is no longer awaiting approval',
+        );
+      }
+
       const scheduledTimes = input.targets
         .map((target) => target.scheduledAt)
         .filter((value): value is string => value !== null)
@@ -252,9 +285,8 @@ export class PublicationRepository {
           job.attemptCount,
         );
       }
-    })();
-
-    return { plan, jobs };
+      return { plan, jobs };
+    }).immediate();
   }
 
   approve(planId: string, approvedBy: string): StoredPublicationPlan {

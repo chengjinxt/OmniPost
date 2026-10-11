@@ -109,6 +109,51 @@ describe('PublicationRepository', () => {
     );
   });
 
+  it('returns the existing awaiting-approval plan for an identical retry', () => {
+    const revision = revisionFixture();
+    const input = {
+      revision,
+      variants: [],
+      targets: [{
+        accountId: 'account-wechat',
+        platform: 'WECHAT_OFFICIAL_ACCOUNT',
+        deliveryMode: 'DIRECT_API' as const,
+        scheduledAt: null,
+        platformFields: {
+          __omniPostAccountBindingVersion: 1,
+          title: '恢复审批',
+        },
+      }],
+    };
+
+    const first = repository.createPlan(input);
+    const resumed = repository.createPlan(input);
+
+    expect(resumed.plan.id).toBe(first.plan.id);
+    expect(resumed.jobs).toEqual(first.jobs);
+    expect(repository.listJobs()).toHaveLength(1);
+  });
+
+  it('does not reuse an identical plan after it has left approval', () => {
+    const revision = revisionFixture();
+    const input = {
+      revision,
+      variants: [],
+      targets: [{
+        accountId: 'account-wechat',
+        platform: 'WECHAT_OFFICIAL_ACCOUNT',
+        deliveryMode: 'DIRECT_API' as const,
+        scheduledAt: null,
+        platformFields: {},
+      }],
+    };
+    const created = repository.createPlan(input);
+    repository.approve(created.plan.id, 'local-user');
+
+    expect(() => repository.createPlan(input)).toThrow(/identical publication/i);
+    expect(repository.listJobs()).toHaveLength(1);
+  });
+
   it('refuses approval when the persisted revision hash no longer matches the plan', () => {
     const revision = revisionFixture();
     const created = repository.createPlan({ revision, variants: [], targets: [{

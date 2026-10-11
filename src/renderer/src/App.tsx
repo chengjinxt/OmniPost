@@ -50,6 +50,8 @@ const navigation: ReadonlyArray<{ label: string; icon: typeof LayoutDashboard; v
   { label: '运行诊断', icon: ChartNoAxesColumnIncreasing, view: 'diagnostics' },
 ] as const;
 
+const JOB_REFRESH_INTERVAL_MS = 5_000;
+
 export function App(): React.JSX.Element {
   const [view, setView] = useState<View>('dashboard');
   const [documents, setDocuments] = useState<ContentDocumentDto[]>([]);
@@ -96,13 +98,6 @@ export function App(): React.JSX.Element {
       .catch(() => {
         if (active) setError('无法读取开机启动设置。');
       });
-    void window.omniPost.listPublishJobs()
-      .then((items) => {
-        if (active) setPublishJobs(items);
-      })
-      .catch(() => {
-        if (active) setError('发布队列暂时无法读取，请在运行诊断中查看详情。');
-      });
     void window.omniPost.getAiProfile()
       .then((profile) => {
         if (active) setAiProfile(profile);
@@ -118,6 +113,29 @@ export function App(): React.JSX.Element {
         if (active) setError('无法读取运行诊断摘要。');
       });
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refreshJobs = async (): Promise<void> => {
+      try {
+        const items = await window.omniPost.listPublishJobs();
+        if (active) setPublishJobs(items);
+      } catch {
+        if (active) setError('发布队列暂时无法读取，请在运行诊断中查看详情。');
+      }
+    };
+    const refreshWhenVisible = (): void => {
+      if (document.visibilityState === 'visible') void refreshJobs();
+    };
+    void refreshJobs();
+    const interval = window.setInterval(refreshWhenVisible, JOB_REFRESH_INTERVAL_MS);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
   }, []);
 
   const openNewContent = (): void => {
