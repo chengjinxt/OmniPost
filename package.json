@@ -1,0 +1,93 @@
+{
+  "name": "omnipost",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows desktop publishing workspace for adapting and delivering content across platforms.",
+  "main": "./out/main/index.js",
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24.21.0 <24.22.0",
+    "pnpm": "11.25.0"
+  },
+  "scripts": {
+    "preinstall": "node --experimental-strip-types scripts/check-toolchain.ts",
+    "toolchain:check": "node --experimental-strip-types scripts/check-toolchain.ts",
+    "assets:generate": "node scripts/generate-icons.mjs",
+    "dev": "node --experimental-strip-types scripts/check-toolchain.ts && electron-vite dev",
+    "build": "node --experimental-strip-types scripts/check-toolchain.ts && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
+    "package": "node --experimental-strip-types scripts/check-toolchain.ts && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build && electron-builder --win nsis",
+    "test": "node --experimental-strip-types scripts/check-toolchain.ts && vitest run",
+    "test:watch": "vitest",
+    "lint": "node --experimental-strip-types scripts/check-toolchain.ts && eslint .",
+    "typecheck": "node --experimental-strip-types scripts/check-toolchain.ts && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "verify": "node --experimental-strip-types scripts/check-toolchain.ts && eslint . && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && vitest run && electron-vite build"
+  },
+  "dependencies": {
+    "@tiptap/react": "3.31.4",
+    "@tiptap/starter-kit": "3.31.4",
+    "better-sqlite3": "13.0.3",
+    "ffmpeg-static": "5.3.0",
+    "ffprobe-static": "3.1.0",
+    "lucide-react": "1.55.0",
+    "mdast-util-to-string": "4.0.0",
+    "playwright": "1.64.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "rehype-stringify": "10.0.1",
+    "remark-gfm": "4.0.1",
+    "remark-parse": "11.0.0",
+    "remark-rehype": "11.1.2",
+    "sanitize-html": "2.18.0",
+    "sharp": "0.35.5",
+    "unified": "11.0.5",
+    "yaml": "2.9.1",
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "4.2.1",
+    "@eslint/js": "10.0.1",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/sanitize-html": "2.16.2",
+    "@vitejs/plugin-react": "5.2.0",
+    "cross-env": "10.1.0",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "eslint": "10.12.0",
+    "globals": "17.13.0",
+    "jsdom": "30.1.2",
+    "png-to-ico": "3.0.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1",
+    "vite": "7.3.7",
+    "vitest": "5.0.3"
+  },
+  "build": {
+    "appId": "com.omnipost.desktop",
+    "productName": "OmniPost",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "resources/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "resources/icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
