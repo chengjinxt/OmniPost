@@ -1,0 +1,1 @@
+This legacy text must never become a body candidate.
