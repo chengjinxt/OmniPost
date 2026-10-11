@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>OmniPost Assisted Editor Fixture</title>
+  </head>
+  <body>
+    <div id="login-gate" data-gate="login" hidden>请登录后继续</div>
+    <div id="captcha-gate" data-gate="captcha" hidden>请完成人机验证</div>
+    <form id="editor">
+      <label>标题 <input id="title" name="title" data-field="title" /></label>
+      <label>正文 <textarea id="body" name="body" data-field="body"></textarea></label>
+      <label>媒体 <input id="media" name="media" data-field="files" type="file" multiple /></label>
+      <button id="save-draft" data-action="draft" type="button">保存草稿</button>
+      <button id="cancel" data-action="cancelled" type="button">取消</button>
+      <button id="submit" data-action="submitted" type="button">最终提交</button>
+    </form>
+    <script>
+      const parameters = new URLSearchParams(window.location.search);
+      document.querySelector('#login-gate').hidden = parameters.get('gate') !== 'login';
+      document.querySelector('#captcha-gate').hidden = parameters.get('gate') !== 'captcha';
+
+      function record(action) {
+        const payload = {
+          title: document.querySelector('#title').value,
+          body: document.querySelector('#body').value,
+          files: Array.from(document.querySelector('#media').files).map((file) => file.name),
+        };
+        window.location.hash = `${action}:${encodeURIComponent(JSON.stringify(payload))}`;
+      }
+
+      document.querySelector('#save-draft').addEventListener('click', () => record('draft'));
+      document.querySelector('#cancel').addEventListener('click', () => record('cancelled'));
+      document.querySelector('#submit').addEventListener('click', () => record('submitted'));
+    </script>
+  </body>
+</html>
